@@ -1,4 +1,4 @@
-# Prerequisites
+.vs/HelloWorld/v16# Prerequisites
 *.d
 
 # Compiled Object files
@@ -34,4 +34,5 @@
 # Private stuff 
 passwords.pass
 
-
+#VS BS we don't want to mess with.........
+/.vs/HelloWorld/v16
