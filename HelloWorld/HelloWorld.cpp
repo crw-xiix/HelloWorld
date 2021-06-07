@@ -6,6 +6,7 @@
 int main()
 {
     std::cout << "Hello World - It's a beautiful morning!\n";
+    std::cout << "A horse left road apples in my driveway last night.\n";
     int i;
     std::cin >> i;
 }
