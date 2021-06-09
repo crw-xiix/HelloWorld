@@ -7,7 +7,8 @@
 int main()
 {
 	GinCounter::test();
-	std::string st;
-	std::cin >> st;
+	
+	/*std::string st;
+	std::cin >> st;*/
 	return 0;
 }

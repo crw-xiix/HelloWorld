@@ -11,7 +11,7 @@
 
 class Card {
 public:
-    static const std::vector<std::string> cardVals;// = { "A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K" };
+    static const std::vector<std::string> cardVals;// = { "A", "2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K" };
     static const std::vector<std::string> cardSuits;// = { "Spade", "Hearts", "Clubs", "Diamonds" };
 private:
     int cardId;
@@ -21,6 +21,8 @@ private:
     std::string cardName = "";
     bool up = true;
 public:
+    bool run = false;
+    bool set = false;
     inline Card() {
         int c = 0;
         cardId = c;          

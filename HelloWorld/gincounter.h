@@ -5,7 +5,10 @@
 #include <string>
 #include <iostream>
 #include <iterator>
+//#include <numeric>
+#include <tuple>
 #include <stdlib.h>
+
 #include "card.h"
 
 class GinCounter {
@@ -26,6 +29,14 @@ private:
     {
         return (a.getRankOrder() < b.getRankOrder());
     }
+    inline int getBitCount(int n) {
+        unsigned int count = 0;
+        while (n) {
+            count += n & 1;
+            n >>= 1;
+        }
+        return count;
+    }
 
 public:
     /// <summary>
@@ -33,11 +44,9 @@ public:
     /// </summary>
     /// <param name="icards"></param>
     /// <returns></returns>
-    static inline std::pair<int, int> count(std::vector<Card>& icards) {
+    inline std::tuple<int, int, std::vector<Card> > count(std::vector<Card>& icards, bool order = false) {
         std::vector<Card> cards;
         std::vector<Card> good;
-        std::vector<Card> cards4Pairs;
-        std::vector<Card> cards4Runs;
 
         //Need to copy the passed cards
         for (auto& card : icards) cards.push_back(card);
@@ -46,82 +55,52 @@ public:
         int bestDead = 1000;
         int bestScore = -1000;
 
-        int max = 1 << (cards.size());
         int len = cards.size();
 
-        //This will loop 1024, more on 11 cards
-        for (int i = 0; i < max; i++) {
-            cards4Pairs.clear();
-            cards4Runs.clear();
-            good.clear();
-            //Split them into two sets of cards
-            //We try all combinations, it's not that many, and it's not called often
-            for (int c = 0; c < len; c++) {
-                if ((i & (1 << c)) >= 1) {
-                    cards4Pairs.push_back(cards[c]);
-                }
-                else {
-                    cards4Runs.push_back(cards[c]);
-                }
-            }
 
-            //Move out the runs, sort if 3+
-            if (cards4Runs.size() >= 3) {
-                sort(cards4Runs.begin(), cards4Runs.end(), &sortByNewDeckOrder);
-                while (moveOutRuns(cards4Runs, good)) {
-                }
-            }
-            //Move out the pairs, sort if 3+
-            if (cards4Pairs.size() >= 3) {
-                sort(cards4Pairs.begin(), cards4Pairs.end(), &sortByRankOrder);
-                while (moveOutPairs(cards4Pairs, good)) {
-                }
-            }
-            /*
-            if (good.size() > 0) {
-                std::cout << "Good cards:";
-                showHand(good);
-            }*/
-            std::vector<Card> dead;
-            //Calculate the deadwood
-            int deadwood = 0;
-            for (Card& c : cards4Runs) {
-                deadwood += clip(c.getCardValue());
-                dead.push_back(c);
-            }
-            for (Card& c : cards4Pairs) {
-                deadwood += clip(c.getCardValue());
-                dead.push_back(c);
-            }
-            /*
-            if (dead.size() > 0) {
-                std::cout << "Dead Wood:";
-                showHand(dead);
-            }*/
-
-            //Now the score
-            int score = 0;
-            for (Card& c : good) {
-                score += clip(c.getCardValue());
-            }
-            //Update the bestScore/bestDead
-            if (deadwood <= bestDead) {
-                if (score > bestScore) {
-                    bestDead = deadwood;
-                    bestScore = score;
-                }
-            }
+        good.clear();
+        
+        //Move out the runs, sort if 3+
+        
+        if (!order) {
+            sort(cards.begin(), cards.end(), &sortByNewDeckOrder);
+            while (moveOutRuns(cards, good)) {}
+            
+            sort(cards.begin(), cards.end(), &sortByRankOrder);
+            while (moveOutSets(cards, good)) {}
         }
-        return { bestDead, bestScore };
-    }
+        else {
+            sort(cards.begin(), cards.end(), &sortByRankOrder);
+            while (moveOutSets(cards, good)) {}
 
-    static int calcDead(std::vector<Card> cards) {
+            sort(cards.begin(), cards.end(), &sortByNewDeckOrder);
+            while (moveOutRuns(cards, good)) {}
+        }
+
+        //Calculate the deadwood
+        int deadwood = 0;
+        for (Card& c : cards) {
+            deadwood += clip(c.getCardValue());
+            //dead.push_back(c);
+        }
+        
+        //Now the score
+        int score = 0;
+        for (Card& c : good) {
+            score += clip(c.getCardValue());
+        }
+        //Now move the rest over....
+        moveOutRest(cards, good);
+        return { deadwood, score, good };
+   }
+
+     inline int calcDead(std::vector<Card> cards) {
         int deadwood = 0;
         for (Card cc : cards) deadwood += clip(cc.getCardValue());
         return deadwood;
     }
 
-    inline static bool moveOutRuns(std::vector<Card>& cards, std::vector<Card>& dest) {
+    inline bool moveOutRuns(std::vector<Card>& cards, std::vector<Card>& dest) {
         int lastSuit = -2;   //invalid value (nothing found yet)
         int lastValue = -2;  //invalid value
         int runs = 0;
@@ -142,6 +121,8 @@ public:
                         int idx = i - runs - 1;
                         Card v = cards[idx];
                         cards.erase(std::next(cards.begin(), idx));
+                        v.run = true;
+                        v.set = false;
                         dest.push_back(v);
                     }
                     return true;
@@ -157,6 +138,8 @@ public:
                 int idx = len - runs - 1;
                 Card v = cards[idx];
                 cards.erase(std::next(cards.begin(), idx));
+                v.run = true;
+                v.set = false;
                 dest.push_back(v);
             }
             return true;
@@ -164,78 +147,145 @@ public:
         return false;
     }
 
-    static inline bool moveOutPairs(std::vector<Card>& cards, std::vector<Card>& dest) {
-        int lastSuit = -2;
-        int lastValue = -2;
-        int runs = 0;
+    inline void moveCardOut(std::vector<Card>& cards, std::vector<Card>& dest, int sidx) {
+        cards.erase(std::next(cards.begin(), sidx));
+    }
 
+    inline void moveOutRest(std::vector<Card>& cards, std::vector<Card>& dest) {
+        for (;cards.size()>0;) {
+            dest.push_back(cards[0]);
+            moveCardOut(cards, dest, 0);
+        }
+    }
+    inline bool moveOutSets(std::vector<Card> &cards, std::vector<Card>& dest) {
+        int sets = 0;
         int len = cards.size();
         if (len < 3) return false;
-        //std::cout << "Pairs moved out";
-        for (int i = 0; i < len; i++) {
-            Card& c = cards[i];
-            /*
-            println("" + c);
-            println("last:" + lastSuit + "." + lastValue + " this " + c.suit + "." + c.cardValue);
-            */
-            //Scan for 3oK/4oK
-            if (((c.getCardNo()) == (lastValue))) {
-                runs++;
-                lastValue = c.getCardNo();
-            }
-            else {
-                if (runs >= 2) {
-                    //                    print("--------detected run:");
-                    for (int ii = 0; ii <= runs; ii++) {
-                        int idx = i - runs - 1;
-                        if (idx < 0) {
-                            std::cout << "Error card: " << idx << "\n";
-                        }
-                        Card& v = cards[idx];
-                        cards.erase(std::next(cards.begin(), idx));
-                        dest.push_back(v);
-                        //std::cout << v.getName() + " ";
-                    }
-                    return true;
-                }
-                runs = 0;
-                lastValue = c.getCardNo();
-            }
-        }
+        bool setDone = false;
+        //Mark them
+        for (size_t i = 0; i < (cards.size() - 1); i++) {
+            len = cards.size() - i;
+            //Test for 4
+            if (len >= 4) {
+                if (cards[i].getCardNo() == cards[i + 1].getCardNo())
+                    if (cards[i + 1].getCardNo() == cards[i + 2].getCardNo())
+                        if (cards[i + 2].getCardNo() == cards[i + 3].getCardNo()) {
+                            //remove the first 4 now
+                            for (int c = 0; c < 4; c++) {
+                                //remove the first 3 now
+                                Card& card = cards[i];
+                                card.set = true;
+                                card.run = false;
+                                dest.push_back(card);
+                                moveCardOut(cards, dest, i);
+                                int p = 0;
 
-        //It's all over now, 
-        if (runs >= 2) {
-            //            print("--------detected run:");
-            for (int ii = 0; ii <= runs; ii++) {
-                int idx = len - runs - 1;
-                Card v = cards[idx];
-                cards.erase(std::next(cards.begin(), idx));
-                dest.push_back(v);
-                //                std::cout << v.getName() + " ";
+                            }
+                            continue;
+                        }
             }
-            //   println("");
-            return true;
+            if (len >= 3) {
+                if (cards[i].getCardNo() == cards[i + 1].getCardNo()) {
+                    if (cards[i + 1].getCardNo() == cards[i + 2].getCardNo()) {
+                        for (int c = 0; c < 3; c++) {
+                            //remove the first 3 now
+                            Card& card = cards[i];
+                            card.set = true;
+                            card.run = false;
+                            dest.push_back(card);
+                            moveCardOut(cards, dest, i);
+                            int p = 0;
+                        }
+                    }
+                }
+            }
         }
         return false;
     }
 
-    static inline int rand52() {
+    inline int rand52() {
         return rand() % 52;
     }
-    static inline void showHand(std::vector<Card>& cards) {
+
+    inline void showHand(std::vector<Card>& cards, bool showSets=false) {
+        int sum = 0;
         for (auto& card : cards) {
             std::cout << card.getName() << " ";
+            sum += clip(card.getCardValue());
         }
+        std::cout << " T: " << sum;
         std::cout << "\n";
+        if (showSets) {
+            for (auto& card : cards) {
+                if (card.set) {
+                    std::cout << "SS ";
+                }
+                else
+                    if (card.run) {
+                        std::cout << "RR ";
+                    }
+                    else
+                    {
+                        std::cout << "-- ";
+                    }
+            }
+            std::cout << "\n";
+        }
+       
     }
 
     inline static void test() {
+        GinCounter counter;
+
         std::vector<Card> cards;
         std::vector<Card> deck;
+        std::vector<Card> dest;
+        //set
+        cards.push_back(Card(0, 0, "4C"));
+        cards.push_back(Card(0, 0, "4D"));
+        cards.push_back(Card(0, 0, "4S"));
+        //run
+        cards.push_back(Card(0, 0, "8H"));
+        cards.push_back(Card(0, 0, "9H"));
+        cards.push_back(Card(0, 0, "TH"));
+        //set
+        cards.push_back(Card(0, 0, "6H"));
+        cards.push_back(Card(0, 0, "6C"));
+        cards.push_back(Card(0, 0, "6S"));
+        cards.push_back(Card(0, 0, "6D"));
+
+
+        /*
+        counter.moveOutSets(cards, dest);
+        while (counter.moveOutRuns(cards, dest)) {};
+        sort(dest.begin(), dest.end(), &sortByRankOrder);
+        counter.showHand(dest,true);
+        std::cout << "\n[" << " " << "]" << "-------------------------------------------\n";
+        */
+        /*
+        auto v = counter.count(cards);
+//        std::cout << "\n[" << (i + 1) << "]" << "-------------------------------------------\n";
+        counter.showHand(cards);
+        //std::cout << "\nCounting Hand\n";
+
+        auto bestGood = std::get<2>(v);
+        sort(bestGood.begin(), bestGood.end(), &sortByRankOrder);
+        counter.showHand(bestGood, true);
+        std::cout << "Dead:" << std::get<0>(v) << " Score:" << std::get<1>(v) <<
+            " Summed:" << (std::get<0>(v) + std::get<1>(v)) << "\n";
+            */
+
         srand(1);
-        for (int i = 0; i < 100; i++) {
+        //std::cin.ignore();
+        //return ;
+        std::cout << "\n[" << "]" << "-------------------------------------------\n";
+        int totalDead = 0;
+
+        for (int i = 0; i < 1000; i++) {
             cards.clear();
             deck.clear();
+            dest.clear();
+
             //Full random card test.  no dups
             for (int c = 0; c < 52; c++) {
                 deck.push_back(Card(0, 0, c));
@@ -245,35 +295,31 @@ public:
                 cards.push_back(deck[pos]);
                 deck.erase(std::next(deck.begin(), pos));
             }
-
-
-            /*
-            cards.push_back(Card(0, 0, "AH"));
-            cards.push_back(Card(0, 0, "4H"));
-            cards.push_back(Card(0, 0, "4C"));//
-            cards.push_back(Card(0, 0, "5H"));//
-            cards.push_back(Card(0, 0, "6C"));//
-            cards.push_back(Card(0, 0, "QH"));
-            cards.push_back(Card(0, 0, "JC"));
-            cards.push_back(Card(0, 0, "8D"));//
-            cards.push_back(Card(0, 0, "8S"));//
-            cards.push_back(Card(0, 0, "8H"));//
-            */
-            std::cout << "Before sort\n";
-            //That will give us 10 random cards.
-            showHand(cards);
-            sort(cards.begin(), cards.end(), &sortByNewDeckOrder);
-            std::cout << "\nAfter sort New Deck Order\n";
-            showHand(cards);
-
-            std::cout << "\nAfter sort Rank Order\n";
+            
+            std::cout << "\n[" << (i + 1) << "]" << "-------------------------------------------\n";
             sort(cards.begin(), cards.end(), &sortByRankOrder);
-            showHand(cards);
+            sort(cards.begin(), cards.end(), &sortByNewDeckOrder);
+            counter.showHand(cards);
 
-            std::cout << "\nCounting Hand\n";
-            auto v = GinCounter::count(cards);
-            std::cout << "Dead:" << v.first << " Score:" << v.second << "\n";
+            auto v = counter.count(cards,true);
+            auto vr = counter.count(cards, false);
+            
+            if (std::get<0>(vr) < std::get<0>(v)) {
+                //Swap 'em
+                v = vr;
+            }
+
+            auto bestGood = std::get<2>(v);
+            sort(bestGood.begin(), bestGood.end(), &sortByNewDeckOrder);
+            sort(bestGood.begin(), bestGood.end(), &sortByRankOrder);
+            counter.showHand(bestGood, true);
+            totalDead += std::get<0>(v);
+            std::cout << "Dead:" << std::get<0>(v) << " Score:" << std::get<1>(v) << " Summed:" << (std::get<0>(v) + std::get<1>(v)) << "\n";
+
+            
         }
+        std::cout << "Total Dead: " << totalDead;
+        std::cin.get();
     }
 };
 
